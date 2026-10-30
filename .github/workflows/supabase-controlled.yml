@@ -1,0 +1,84 @@
+name: Supabase controlled operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Select exactly one reviewed operation
+        required: true
+        type: choice
+        options:
+          - migration-dry-run
+          - migration-apply
+          - deploy-function
+      confirm_target:
+        description: For a production write, enter the exact Supabase project ref
+        required: false
+        type: string
+      confirm_write:
+        description: For migration-apply enter APPLY REVIEWED PRODUCTION MIGRATION; for deploy-function enter DEPLOY REVIEWED EDGE FUNCTION
+        required: false
+        type: string
+      function_name:
+        description: Required only when operation is deploy-function
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production-operations
+  cancel-in-progress: false
+
+jobs:
+  controlled-operation:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (inputs.operation == 'migration-dry-run' ||
+       (inputs.confirm_target == 'hhpuedvauylgcwdpphjg' &&
+        ((inputs.operation == 'migration-apply' && inputs.confirm_write == 'APPLY REVIEWED PRODUCTION MIGRATION') ||
+         (inputs.operation == 'deploy-function' && inputs.confirm_write == 'DEPLOY REVIEWED EDGE FUNCTION')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: supabase-production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.0
+      - name: Link the explicitly selected project
+        if: inputs.operation != 'migration-dry-run'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase link --project-ref hhpuedvauylgcwdpphjg --password "$SUPABASE_DB_PASSWORD"
+      - name: Preview pending database migrations
+        if: inputs.operation == 'migration-dry-run'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref hhpuedvauylgcwdpphjg --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --linked --dry-run
+      - name: Apply reviewed database migrations
+        if: inputs.operation == 'migration-apply' && inputs.confirm_write == 'APPLY REVIEWED PRODUCTION MIGRATION'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: supabase db push --linked
+      - name: Deploy one named Edge Function
+        if: inputs.operation == 'deploy-function' && inputs.confirm_write == 'DEPLOY REVIEWED EDGE FUNCTION'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          FUNCTION_NAME: ${{ inputs.function_name }}
+        run: |
+          if ! printf '%s' "$FUNCTION_NAME" | grep -Eq '^[a-z0-9_-]+$'; then
+            echo "function_name must contain only lowercase letters, digits, underscores, and hyphens" >&2
+            exit 1
+          fi
+          if [ ! -f "supabase/functions/$FUNCTION_NAME/index.ts" ]; then
+            echo "Named function entrypoint does not exist in the checked-out repository" >&2
+            exit 1
+          fi
+          supabase functions deploy "$FUNCTION_NAME" --project-ref hhpuedvauylgcwdpphjg

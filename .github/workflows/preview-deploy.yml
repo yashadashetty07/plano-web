@@ -1,0 +1,52 @@
+name: Preview deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Enter PUBLISH APPROVED PUBLIC PREVIEW to continue
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: plano-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref != 'refs/heads/main' && inputs.confirmation == 'PUBLISH APPROVED PUBLIC PREVIEW'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloudflare-preview
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test -- --run
+      - name: Verify browser-safe Supabase build configuration
+        run: |
+          test -n "$VITE_SUPABASE_URL"
+          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY"
+      - run: pnpm build
+      - name: Deploy to the protected preview environment
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: pages deploy dist --project-name=plano-web --branch=preview

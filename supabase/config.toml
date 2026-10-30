@@ -1,0 +1,11 @@
+# Local Supabase CLI project configuration. This file does not link or change the hosted project.
+project_id = "plano-web"
+
+[api]
+enabled = true
+port = 54321
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+deno_version = 2
