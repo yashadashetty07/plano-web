@@ -44,7 +44,7 @@ jobs:
     environment: supabase-production
     steps:
       - uses: actions/checkout@v7
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.122.0
       - name: Link the explicitly selected project
